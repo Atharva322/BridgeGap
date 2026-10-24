@@ -1,0 +1,11 @@
+# Secrets: never commit (CONSTRAINTS.md)
+.env
+.env.*
+!.env.example
+
+# Local state
+*.db
+*.sqlite
+node_modules/
+dist/
+.DS_Store
