@@ -134,7 +134,7 @@ export class Store {
     return rows.map(toRequest);
   }
 
-  /** First valid verdict wins; anything after that is rejected as not pending. */
+  /** A local (CLI) answer, addressed by the short reply code a human typed. */
   recordVerdict(
     replyCode: string,
     decision: Decision,
@@ -144,14 +144,25 @@ export class Store {
   ): VerdictResult {
     const request = this.findPendingByCode(replyCode);
     if (!request) return { ok: false, reason: 'no_pending_request' };
-    const verdict: Verdict = { requestId: request.requestId, decision, approver, channel: 'cli', reason, decidedAt: now };
+    return this.applyVerdict({ requestId: request.requestId, decision, approver, channel: 'cli', reason, decidedAt: now });
+  }
+
+  /**
+   * Records a verdict for a specific request. First valid verdict wins: anything arriving after the
+   * request left 'pending' (another verdict, expiry, abandonment) is rejected.
+   */
+  applyVerdict(verdict: Verdict): VerdictResult {
+    const request = this.getRequest(verdict.requestId);
+    if (!request || request.status !== 'pending') return { ok: false, reason: 'no_pending_request' };
+    const { decision, approver, reason } = verdict;
+    const now = verdict.decidedAt;
     this.db.exec('BEGIN');
     try {
       this.db
         .prepare('INSERT INTO verdicts (request_id, decision, approver, channel, reason, decided_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(verdict.requestId, decision, approver, verdict.channel, reason ?? null, now);
       this.db.prepare(`UPDATE requests SET status = 'resolved' WHERE request_id = ? AND status = 'pending'`).run(verdict.requestId);
-      this.audit(verdict.requestId, `verdict_${decision}`, `by ${approver} via cli${reason ? `: ${reason}` : ''}`, now);
+      this.audit(verdict.requestId, `verdict_${decision}`, `by ${approver} via ${verdict.channel}${reason ? `: ${reason}` : ''}`, now);
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');

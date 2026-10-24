@@ -1,8 +1,9 @@
 // bridgegap <command>: run the daemon, or act as the Stage 1 stand-in for a channel (D-013).
 import { userInfo } from 'node:os';
-import type { BlockedRequest } from '@bridgegap/protocol';
-import { claudeHookSettings, loadConfig, type DaemonConfig } from './config.ts';
-import { createDaemonServer } from './server.ts';
+import { decodePairing, type BlockedRequest } from '@bridgegap/protocol';
+import { claudeHookSettings, loadConfig, saveRelayPairing, type DaemonConfig } from './config.ts';
+import { RelayClient } from './relay-client.ts';
+import { createDaemon } from './server.ts';
 import { Store } from './store.ts';
 
 const USAGE = `usage: bridgegap <command>
@@ -10,7 +11,9 @@ const USAGE = `usage: bridgegap <command>
   pending                 list requests waiting for a decision
   approve <code>          allow the request with this reply code
   deny <code> [reason]    deny it, optionally telling the agent why
-  hook-config             print the Claude Code settings block and token setup`;
+  hook-config             print the Claude Code settings block and token setup
+  pair <pairing-code>     trust a relay (code from: npm run relay -- pair)
+  unpair                  forget the relay and go back to local-only`;
 
 async function callDaemon(config: DaemonConfig, method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
   let res: Response;
@@ -37,14 +40,20 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case 'daemon': {
+      const log = (line: string) => console.log(`[bridgegap] ${line}`);
       const store = new Store(config.dbPath);
       const orphans = store.abandonOrphans();
-      const server = createDaemonServer({ ...config, store, log: (line) => console.log(`[bridgegap] ${line}`) });
+      const relay = config.relay ? new RelayClient(config.relay, log) : undefined;
+      const { server, acceptRelayVerdict } = createDaemon({ ...config, store, relay, log });
+      const stopRelay = new AbortController();
       server.listen(config.port, '127.0.0.1', () => {
-        console.log(`[bridgegap] listening on 127.0.0.1:${config.port}  (db ${config.dbPath})`);
-        if (orphans) console.log(`[bridgegap] marked ${orphans} request(s) from a previous run as abandoned`);
+        log(`listening on 127.0.0.1:${config.port}  (db ${config.dbPath})`);
+        log(relay ? `paired with relay ${relay.url}` : 'local-only (no relay paired); answer with `bridgegap approve <code>`');
+        if (orphans) log(`marked ${orphans} request(s) from a previous run as abandoned`);
+        void relay?.run(acceptRelayVerdict, stopRelay.signal);
       });
       const shutdown = () => {
+        stopRelay.abort();
         server.close();
         server.closeAllConnections(); // held hook requests fail, so Claude falls back to its local prompt
         store.close();
@@ -87,6 +96,21 @@ async function main(argv: string[]): Promise<number> {
       console.log('\nThen, in the shell you start `claude` from:');
       console.log(`  PowerShell:  $env:BRIDGEGAP_HOOK_TOKEN = "${config.hookToken}"`);
       console.log(`  bash/zsh:    export BRIDGEGAP_HOOK_TOKEN=${config.hookToken}`);
+      return 0;
+    }
+    case 'pair': {
+      if (!args[0]) {
+        console.error(USAGE);
+        return 2;
+      }
+      const pairing = decodePairing(args[0]);
+      saveRelayPairing(config, pairing);
+      console.log(`paired with relay ${pairing.relayUrl}; restart the daemon to connect`);
+      return 0;
+    }
+    case 'unpair': {
+      saveRelayPairing(config, undefined);
+      console.log('relay pairing removed; restart the daemon to go local-only');
       return 0;
     }
     default:

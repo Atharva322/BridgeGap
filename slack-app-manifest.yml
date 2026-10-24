@@ -1,0 +1,22 @@
+# Paste into https://api.slack.com/apps -> Create New App -> From a manifest. See docs/SLACK-SETUP.md.
+display_information:
+  name: BridgeGap
+  description: Approve or deny requests from your AI coding agents.
+features:
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: BridgeGap
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - chat:write # post the approval DM and rewrite it when the request ends
+      - im:write # open the DM with each approver
+settings:
+  interactivity:
+    is_enabled: true # Allow/Deny buttons; delivered over Socket Mode, no public URL (D-015)
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

@@ -14,7 +14,19 @@ The other endings:
 - **Claude hangs up:** `res.on('close')` marks the request `abandoned`.
 - **Daemon restart:** `abandonOrphans()` closes requests left over from the previous run.
 
-## Target path (Stage 2+)
+## Stage 2 as built (relay + Slack)
+1. The hook arrives at the daemon exactly as in Stage 1, steps 1–3. Before forwarding, the daemon registers the waiter, so an instant verdict still has somewhere to land.
+2. `RelayClient.submit()` (`packages/daemon/src/relay-client.ts`) sends `POST /v1/requests` to the relay with the daemon token. The request is already redacted.
+3. The relay server (`packages/relay/src/server.ts`) calls `Broker.submit()` (`packages/relay/src/broker.ts`), which stores the request idempotently (`RelayStore.insertRequest`) and emits `created`.
+4. `SlackChannel.notify()` (`packages/relay/src/slack.ts`) sends `chat.postMessage` to each approver's user ID and saves the message references (`messages` table).
+5. A click reaches `runSocketMode()` as an `interactive` envelope. It is acknowledged immediately, then `SlackChannel.handleInteraction()` checks that `user.id` is in the approver list (D-010) and calls `Broker.decide()`.
+6. `Broker.decide()` builds the verdict and signs it with Ed25519. `insertVerdict` stores it (first wins, gets the next `seq`). Long-pollers are woken and `finished` is emitted, which rewrites the Slack messages.
+7. The daemon's `RelayClient.run()` long-poll (`GET /v1/verdicts?after=<seq>`) receives the verdict and verifies its signature against the pinned key (D-016). `acceptRelayVerdict()` then calls `Store.applyVerdict()` (first wins locally too) and wakes the waiter.
+8. The hook replies with the decision, as in Stage 1.
+
+**Local endings:** a CLI answer, an expiry or an abandoned request makes the daemon call `RelayClient.close()`, which sends `POST /v1/requests/close`. The relay then runs `Broker.close()` and rewrites the Slack message, so later clicks get "no longer waiting". The relay's own `expireDue()` sweep, every 5 s, covers daemons that disappeared.
+
+## Target path (Stage 3+)
 
 Status: the intended path. Update this once code exists, naming the real files and functions for each step.
 

@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildPreview, newReplyCode, newRequestId, PREVIEW_MAX } from '@bridgegap/protocol';
+import { generateKeyPairSync } from 'node:crypto';
+import {
+  buildPreview,
+  decodePairing,
+  encodePairing,
+  newReplyCode,
+  newRequestId,
+  PREVIEW_MAX,
+  signVerdict,
+  verifyVerdict,
+  type Verdict,
+} from '@bridgegap/protocol';
+
+test('verdict signatures verify, and fail on any tampering or a different key', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const other = generateKeyPairSync('ed25519').publicKey;
+  const verdict: Verdict = { requestId: 'R1', decision: 'deny', approver: 'slack:U1', channel: 'slack', decidedAt: 1 };
+  const signature = signVerdict(verdict, privateKey);
+  assert.ok(verifyVerdict(verdict, signature, publicKey));
+  assert.ok(!verifyVerdict({ ...verdict, decision: 'allow' }, signature, publicKey));
+  assert.ok(!verifyVerdict({ ...verdict, requestId: 'R2' }, signature, publicKey));
+  assert.ok(!verifyVerdict(verdict, signature, other));
+  assert.ok(!verifyVerdict(verdict, 'garbage', publicKey));
+});
+
+test('pairing codes round-trip and reject junk', () => {
+  const pairing = { relayUrl: 'https://relay.example/', daemonToken: 't', relayPublicKey: 'PEM' };
+  assert.deepEqual(decodePairing(encodePairing(pairing)), { ...pairing, relayUrl: 'https://relay.example' });
+  assert.throws(() => decodePairing('not-a-code'));
+});
 
 test('request ids are 26-char ULIDs that sort by time', () => {
   const a = newRequestId(1_000);

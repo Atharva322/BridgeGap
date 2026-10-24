@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { afterEach, test } from 'node:test';
-import { createDaemonServer } from '../src/server.ts';
+import { createDaemon } from '../src/server.ts';
 import { Store } from '../src/store.ts';
 
 const HOOK_TOKEN = 'h'.repeat(64);
@@ -15,7 +15,7 @@ afterEach(async () => {
 
 async function startDaemon(holdMs = 5_000) {
   const store = new Store(':memory:');
-  const server = createDaemonServer({ store, hookToken: HOOK_TOKEN, adminToken: ADMIN_TOKEN, holdMs });
+  const { server } = createDaemon({ store, hookToken: HOOK_TOKEN, adminToken: ADMIN_TOKEN, holdMs });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   cleanups.push(async () => {

@@ -1,8 +1,10 @@
 // Loopback HTTP server: Claude Code's PermissionRequest hook POSTs here and the request is held open
-// until a verdict arrives, the hold expires, or Claude drops the connection. See docs/FLOW.md.
+// until a verdict arrives (local CLI or, when paired, the relay), the hold expires, or Claude drops
+// the connection. See docs/FLOW.md.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
 import { buildPreview, type Decision, type Verdict } from '@bridgegap/protocol';
+import { handleErrors, HttpError, readJson, requireToken, send } from '@bridgegap/protocol/http';
+import type { RelayClient } from './relay-client.ts';
 import type { Store } from './store.ts';
 
 export interface DaemonOptions {
@@ -10,48 +12,14 @@ export interface DaemonOptions {
   hookToken: string; // presented by Claude Code's hook; can only create requests
   adminToken: string; // presented by the approver CLI; can resolve requests
   holdMs: number; // must be shorter than the hook's own timeout so we answer before Claude gives up
+  relay?: RelayClient; // set once paired (Stage 2); absent means local-only
   log?: (line: string) => void;
 }
 
-const MAX_BODY_BYTES = 1024 * 1024;
-
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-function tokenMatches(header: string | undefined, expected: string): boolean {
-  const presented = Buffer.from(header?.startsWith('Bearer ') ? header.slice(7) : '');
-  const wanted = Buffer.from(expected);
-  return presented.length === wanted.length && timingSafeEqual(presented, wanted);
-}
-
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
-  // JSON-only bodies: a browser cannot send this content type cross-site without a CORS preflight,
-  // which we never answer (THREAT: website in the developer's browser).
-  if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'expected application/json');
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, 'body too large');
-    chunks.push(chunk as Buffer);
-  }
-  try {
-    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
-  } catch {
-    // fall through
-  }
-  throw new HttpError(400, 'body must be a JSON object');
-}
-
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+export interface Daemon {
+  server: Server;
+  /** Entry point for verdicts from the relay; signature already verified by RelayClient. */
+  acceptRelayVerdict(verdict: Verdict): void;
 }
 
 /** Claude Code's PermissionRequest output schema. */
@@ -65,14 +33,14 @@ function hookDecision(verdict: Verdict): unknown {
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
 }
 
-export function createDaemonServer(options: DaemonOptions): Server {
-  const { store, holdMs } = options;
+export function createDaemon(options: DaemonOptions): Daemon {
+  const { store, holdMs, relay } = options;
   const log = options.log ?? (() => {});
   // requestId -> delivers a verdict to the hook connection that is waiting for it.
   const waiters = new Map<string, (verdict: Verdict) => void>();
 
   async function handlePermissionRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!tokenMatches(req.headers.authorization, options.hookToken)) throw new HttpError(401, 'bad hook token');
+    requireToken(req, options.hookToken, 'hook');
     const input = await readJson(req);
     if (typeof input.session_id !== 'string' || typeof input.tool_name !== 'string') {
       throw new HttpError(400, 'expected session_id and tool_name');
@@ -86,7 +54,7 @@ export function createDaemonServer(options: DaemonOptions): Server {
     });
     log(`PENDING  ${request.replyCode}  ${request.preview}  (session ${request.sessionId.slice(0, 8)})`);
 
-    const outcome = await new Promise<Verdict | 'expired' | 'abandoned'>((resolve) => {
+    const outcome = new Promise<Verdict | 'expired' | 'abandoned'>((resolve) => {
       const finish = (value: Verdict | 'expired' | 'abandoned') => {
         clearTimeout(timer);
         waiters.delete(request.requestId);
@@ -99,25 +67,33 @@ export function createDaemonServer(options: DaemonOptions): Server {
         if (waiters.has(request.requestId)) finish('abandoned');
       });
     });
+    // Registered as a waiter before forwarding, so even an instant remote verdict has somewhere to land.
+    if (relay) void relay.submit(request);
+    const result = await outcome;
 
-    if (outcome === 'abandoned') {
+    if (result === 'abandoned') {
       store.closeRequest(request.requestId, 'abandoned');
       log(`GONE     ${request.replyCode}  agent stopped waiting`);
+      void relay?.close(request.requestId, 'abandoned', 'The agent stopped waiting.');
       return;
     }
-    if (outcome === 'expired') {
+    if (result === 'expired') {
       store.closeRequest(request.requestId, 'expired');
       log(`EXPIRED  ${request.replyCode}  handing back to the local prompt`);
+      void relay?.close(request.requestId, 'expired', 'No answer in time; handed back to the local prompt.');
       // D-005: no decision means Claude Code shows its normal permission dialog. Never auto-allow.
       send(res, 200, {});
       return;
     }
-    log(`${outcome.decision.toUpperCase().padEnd(8)} ${request.replyCode}  by ${outcome.approver}`);
-    send(res, 200, hookDecision(outcome));
+    log(`${result.decision.toUpperCase().padEnd(8)} ${request.replyCode}  by ${result.approver} via ${result.channel}`);
+    if (result.channel !== 'slack') {
+      void relay?.close(request.requestId, 'resolved', `${result.decision === 'allow' ? 'Allowed' : 'Denied'} locally by ${result.approver}.`);
+    }
+    send(res, 200, hookDecision(result));
   }
 
   async function handleVerdict(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!tokenMatches(req.headers.authorization, options.adminToken)) throw new HttpError(401, 'bad admin token');
+    requireToken(req, options.adminToken, 'admin');
     const body = await readJson(req);
     const decision = body.decision;
     if (typeof body.code !== 'string' || (decision !== 'allow' && decision !== 'deny')) {
@@ -136,8 +112,19 @@ export function createDaemonServer(options: DaemonOptions): Server {
   }
 
   function handlePending(req: IncomingMessage, res: ServerResponse): void {
-    if (!tokenMatches(req.headers.authorization, options.adminToken)) throw new HttpError(401, 'bad admin token');
+    requireToken(req, options.adminToken, 'admin');
     send(res, 200, { pending: store.listPending() });
+  }
+
+  function acceptRelayVerdict(verdict: Verdict): void {
+    // Same first-wins rule as the CLI: a verdict for a request that is no longer pending here
+    // (answered locally, expired, from a previous daemon run) is dropped.
+    const result = store.applyVerdict(verdict);
+    if (!result.ok) {
+      log(`IGNORED  relay verdict for ${verdict.requestId}: not pending here`);
+      return;
+    }
+    waiters.get(verdict.requestId)?.(result.verdict);
   }
 
   const server = createServer((req, res) => {
@@ -148,19 +135,12 @@ export function createDaemonServer(options: DaemonOptions): Server {
         : route === 'POST /verdicts'
           ? handleVerdict(req, res)
           : route === 'GET /requests/pending'
-            ? Promise.resolve(handlePending(req, res))
+            ? Promise.resolve().then(() => handlePending(req, res))
             : Promise.reject(new HttpError(404, 'not found'));
-    handled.catch((err: unknown) => {
-      if (res.headersSent) return;
-      if (err instanceof HttpError) send(res, err.status, { error: err.message });
-      else {
-        log(`ERROR    ${(err as Error).message}`);
-        send(res, 500, { error: 'internal error' });
-      }
-    });
+    handled.catch(handleErrors(res, log));
   });
   // WHY: a hook request is held open for minutes while a human decides. Node's default
   // requestTimeout (300s) would cut it off, and Claude would treat that as a hook failure.
   server.requestTimeout = 0;
-  return server;
+  return { server, acceptRelayVerdict };
 }

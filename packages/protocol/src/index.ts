@@ -1,6 +1,6 @@
-// Shared request/verdict shapes between the daemon and (from Stage 2) the relay.
+// Shared request/verdict shapes between the daemon and the relay.
 // See docs/DATA.md for the reasoning behind each field.
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, sign, verify, type KeyLike } from 'node:crypto';
 
 export type Decision = 'allow' | 'deny';
 
@@ -20,13 +20,66 @@ export interface BlockedRequest {
   expiresAt: number; // epoch ms; after this the daemon hands control back to the local prompt
 }
 
+export type Channel = 'cli' | 'slack';
+
 export interface Verdict {
   requestId: string;
   decision: Decision;
-  approver: string;
-  channel: 'cli'; // Stage 2 adds 'slack' | 'sms' | ...
+  approver: string; // e.g. "athar" (cli) or "slack:U012AB3CD (atharva)"
+  channel: Channel;
   reason?: string;
   decidedAt: number;
+}
+
+/** What the daemon sends the relay: the request as created locally, minus its local status. */
+export type RelayRequest = Omit<BlockedRequest, 'status'>;
+
+/** A verdict as delivered by the relay. `seq` is the relay's cursor for long-polling (D-014). */
+export interface SignedVerdict {
+  seq: number;
+  verdict: Verdict;
+  signature: string; // base64 Ed25519 over canonicalVerdict(verdict) (D-016)
+}
+
+// A fixed field order so signer and verifier hash identical bytes regardless of object key order.
+function canonicalVerdict(v: Verdict): Buffer {
+  return Buffer.from(JSON.stringify([v.requestId, v.decision, v.approver, v.channel, v.reason ?? null, v.decidedAt]));
+}
+
+export function signVerdict(verdict: Verdict, privateKey: KeyLike): string {
+  return sign(null, canonicalVerdict(verdict), privateKey).toString('base64');
+}
+
+export function verifyVerdict(verdict: Verdict, signature: string, publicKey: KeyLike): boolean {
+  try {
+    return verify(null, canonicalVerdict(verdict), publicKey, Buffer.from(signature, 'base64'));
+  } catch {
+    return false; // malformed key or signature counts as a failed check, never as a pass
+  }
+}
+
+/** Everything a daemon needs to trust one relay, exchanged once as an opaque code (D-016). */
+export interface Pairing {
+  relayUrl: string;
+  daemonToken: string;
+  relayPublicKey: string; // PEM
+}
+
+export function encodePairing(pairing: Pairing): string {
+  return Buffer.from(JSON.stringify(pairing)).toString('base64url');
+}
+
+export function decodePairing(code: string): Pairing {
+  let value: Partial<Pairing>;
+  try {
+    value = JSON.parse(Buffer.from(code.trim(), 'base64url').toString('utf8'));
+  } catch {
+    throw new Error('not a valid pairing code');
+  }
+  if (typeof value.relayUrl !== 'string' || typeof value.daemonToken !== 'string' || typeof value.relayPublicKey !== 'string') {
+    throw new Error('pairing code is missing relayUrl, daemonToken or relayPublicKey');
+  }
+  return { relayUrl: value.relayUrl.replace(/\/+$/, ''), daemonToken: value.daemonToken, relayPublicKey: value.relayPublicKey };
 }
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

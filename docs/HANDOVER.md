@@ -1,40 +1,50 @@
 # HANDOVER
 
-## Latest session: 2026-10-23 (model: claude-opus-5-5): Stage 1 spike
+## Latest session: 2026-10-23 (model: claude-opus-5-5): Stage 2 (relay + Slack)
 
 **Done:**
-- D-012: TypeScript on Node 22 with SQLite. D-013: the shape of the Stage 1 spike.
-- Built `packages/protocol` (ULID request IDs, reply codes, preview redaction) and `packages/daemon`:
-  - a loopback HTTP hook endpoint
-  - a store on `node:sqlite` with an audit log
-  - a CLI: `daemon`, `pending`, `approve`, `deny`, `hook-config`
-- Zero runtime dependencies.
-- `npm test` passes 13/13 and `npm run typecheck` is clean.
-- End-to-end tests against real Claude Code 2.1.300 in headless `-p` mode (see TESTING.md):
-  - approve: the same session continued;
-  - deny: Claude received the reason;
-  - daemon down: Claude failed closed.
-- Bug caught by a test: the redaction step leaked Bearer tokens because of the order of its patterns. Fixed.
+- Decisions recorded:
+  - D-014: HTTP long-poll between daemon and relay.
+  - D-015: Slack Socket Mode with no SDK.
+  - D-016: Ed25519-signed verdicts, with the relay key pinned at pairing.
+  - D-017: the local CLI stays valid, and the first answer wins.
+- New package `packages/relay`:
+  - `RelayStore` for durable state, with verdicts numbered by `seq`;
+  - `Broker` (first answer wins, signing, expiry, long-poll wakeups);
+  - the daemon-facing HTTP API;
+  - `SlackChannel` with DMs, Allow/Deny, approver checks and message rewrites;
+  - `runSocketMode` on Node's global `WebSocket`.
+- Daemon:
+  - `RelayClient` (submit, close, long-poll with signature checks);
+  - `bridgegap pair <code>` / `unpair`;
+  - `createDaemon()` now returns `{ server, acceptRelayVerdict }`.
+- Protocol: `signVerdict` / `verifyVerdict`, pairing codes, and shared HTTP helpers (`@bridgegap/protocol/http`).
+- Slack app manifest, `.env.example`, and `docs/SLACK-SETUP.md`.
+- Still zero runtime dependencies.
+- `npm test` passes 26/26 (run twice) and the type-check is clean. A smoke test of the real relay and daemon processes passed (TESTING.md).
 
 **In progress:**
 - None.
 
 **Broken or risky:**
-- A-001 is unverified. In the interactive TUI, does the terminal permission dialog show while the hook waits? If it doesn't, a user at the keyboard can't answer locally until the daemon's hold expires. This needs a manual test by a human.
-- Stage 1 approval is protected only by an admin token in `~/.bridgegap/config.json`. Any process running as the same OS user can approve. This is accepted for the spike (THREAT.md).
-- `node:sqlite` is still experimental in Node 22.
+- Nothing has run against a live Slack workspace yet (A-010, A-011, A-012). The Socket Mode code is written from the protocol and has only been tested against a fake Slack API.
+- A-001 is still open: whether the interactive TUI shows its dialog while the hook waits.
+- A relay on a plain `http://` URL off localhost sends the daemon token and previews in clear. TLS is required in that setup (THREAT.md).
+- Nothing limits how many requests can be sent to approvers.
 
 **Next:**
-1. Manual test of A-001 in the interactive `claude` TUI (steps in TESTING.md, "Trying Stage 1 yourself").
-2. Test a hold longer than 10 minutes (A-008, `BRIDGEGAP_HOOK_TIMEOUT=1800`).
-3. Stage 2:
-   - add `packages/relay` and an outbound WebSocket from the daemon;
-   - add the Slack channel (Block Kit buttons, signature check, approver identity mapping);
-   - the user creates a Slack app and puts its tokens in a gitignored `.env`.
-   - Draft the D-014+ entries first.
+1. The user creates the Slack app (SLACK-SETUP.md) and fills in `.env`. Then run the live test: real `claude`, a Slack DM, a click, and the session continues. Record the results against A-010–A-012.
+2. Manual TUI test for A-001.
+3. Stage 3 candidates:
+   - the escalation ladder (Slack, then SMS via Twilio);
+   - a Slack deny-reason modal;
+   - a Codex app-server adapter (D-011);
+   - a rate limit on submitted requests.
 
 **Do not touch:**
-- The order of the patterns in `SECRET_PATTERNS`. The Bearer rule must come before the generic `authorization:` rule.
-- `server.requestTimeout = 0`. Without it, Node cuts off held hooks after 5 minutes.
+- The order of the patterns in `SECRET_PATTERNS`.
+- `server.requestTimeout = 0` in both servers.
+- The daemon registers the waiter *before* `relay.submit()`.
+- In Socket Mode, envelopes are acknowledged before they are handled.
 
 Read first: ARCHITECTURE.md, CONSTRAINTS.md

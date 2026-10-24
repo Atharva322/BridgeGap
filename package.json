@@ -4,13 +4,15 @@
   "type": "module",
   "workspaces": [
     "packages/protocol",
-    "packages/daemon"
+    "packages/daemon",
+    "packages/relay"
   ],
   "engines": {
     "node": ">=22.18"
   },
   "scripts": {
     "bridgegap": "node --disable-warning=ExperimentalWarning packages/daemon/src/cli.ts",
+    "relay": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env packages/relay/src/cli.ts",
     "test": "node --disable-warning=ExperimentalWarning --test packages/*/test/*.test.ts",
     "typecheck": "tsc --noEmit -p ."
   },

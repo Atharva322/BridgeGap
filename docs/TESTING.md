@@ -32,6 +32,27 @@ Status: the Phase 1 acceptance checklist. Add the exact commands once the code e
   - It failed closed with no auto-allow (D-005).
 - **Not yet tested:** the interactive TUI (A-001), and holds longer than 10 minutes (A-008).
 
+## Stage 2 results (2026-10-23)
+`npm test`: 26/26 pass, run twice; `npm run typecheck`: clean.
+
+New tests in `packages/relay/test/relay.test.ts`:
+- **T-1 (Stage 2):** the full chain over real HTTP. A daemon hook goes to the relay; a Slack Allow click (fake Slack API) produces a signed verdict; the daemon long-poll receives it and the hook returns `allow`. The audit log shows `slack:U0APPROVER (atharva) via slack`.
+- **T-2:** a verdict issued while no daemon is polling is delivered from the cursor exactly once.
+- **T-5:** a click from a non-approver is rejected, the clicker gets an ephemeral notice, and it is audited as `verdict_rejected`.
+- **D-016:** a daemon pinned to the wrong relay key logs `REJECTED … bad signature`, the hold expires, and the hook returns `{}` (local prompt).
+- **D-017:** a local CLI deny rewrites the Slack message to "Denied locally by athar", and later clicks get "no longer waiting".
+- Slack markup injection through the preview (`<!channel>`, `<@U…>`) is escaped.
+- The relay API has no route that lets a daemon token create a verdict.
+
+**Process smoke test:** real `relay run` and `daemon` processes on a scratch home.
+- Pairing works, and the daemon logs `RELAY connected`.
+- A hook request reached the relay already redacted (`Bash: rm -rf build [redacted]`).
+- The CLI deny returned the reason to the hook, and the relay recorded `resolved: Denied locally by athar.`
+
+**Not tested yet:**
+- A live Slack workspace: Socket Mode connection, real DMs and button clicks (A-010, A-011). Steps are in [SLACK-SETUP.md](SLACK-SETUP.md).
+- Real Claude Code with Slack approval. This is the same hook path as Stage 1's real Claude test, but untested with Slack.
+
 ## Trying Stage 1 yourself
 1. `npm install`
 2. `npm run bridgegap -- daemon` (leave it running).

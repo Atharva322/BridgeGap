@@ -195,3 +195,69 @@ Date: 2026-10-23. Model: claude-opus-5-5. Lane A (spike).
   - `node:sqlite` is still marked experimental in Node 22, so its API may change.
   - Any local process that can read `~/.bridgegap/config.json` can approve requests (see THREAT).
 - **Revisit if:** Stage 2 adds the relay. At that point the daemon stops being the place verdicts come from, and only signed verdicts from the relay are accepted.
+
+## D-014: The daemon talks to the relay over HTTP long-polling, not WebSocket
+Date: 2026-10-23. Model: claude-opus-5-5.
+
+- **Context:** the daemon must send requests to the relay and receive verdicts, connecting outbound only (D-009).
+- **Options:**
+  1. A WebSocket.
+  2. Server-sent events.
+  3. HTTP long-polling: `POST /v1/requests`, and `GET /v1/verdicts?after=<cursor>` held open for up to 25 s.
+- **Chosen:** 3.
+- **Why:**
+  - Node has no built-in WebSocket *server*, so long-polling keeps zero runtime dependencies.
+  - A pull with a cursor redelivers anything missed during a disconnect for free (D-003, T-2).
+  - Plain HTTPS gets through corporate proxies.
+- **Trade-off:** one extra request roughly every 25 s per idle daemon; this is not built for thousands of daemons.
+- **Revisit if:** the hosted relay serves many daemons (move to SSE or WebSocket).
+
+## D-015: Slack uses Socket Mode with Node's built-in WebSocket client and raw Web API calls
+Date: 2026-10-23. Model: claude-opus-5-5.
+
+- **Options:**
+  1. Bolt with HTTP events and request signing.
+  2. Bolt with Socket Mode.
+  3. Socket Mode built by hand on the global `WebSocket` and `fetch`.
+- **Chosen:** 3.
+- **Why:**
+  - Socket Mode needs no public URL, so a self-hosted relay works behind NAT.
+  - Slack authenticates the socket with the app-level token, so interaction payloads (and the `user.id` used for D-010) arrive over an authenticated channel, with no request signatures to check.
+  - The protocol is small: open a connection, acknowledge each envelope, reconnect on disconnect. Bolt would be our first runtime dependency.
+- **Trade-off:**
+  - We own the reconnect and acknowledgement logic.
+  - Socket Mode apps can't be listed in the Slack Marketplace.
+- **Revisit if:** we build the hosted multi-tenant relay. It moves to HTTP events plus signing-secret verification (the original plan's design).
+
+## D-016: The relay signs verdicts with Ed25519, and the daemon pins the relay's public key at pairing
+Date: 2026-10-23. Model: claude-opus-5-5.
+
+- **Context:** a verdict lets code run on the developer's machine, so the daemon must not accept one from anyone except its relay.
+- **Options:**
+  1. Trust the TLS connection only.
+  2. HMAC with a shared secret.
+  3. Ed25519 signatures with a pinned public key.
+- **Chosen:** 3.
+- **Details:**
+  - `bridgegap-relay pair` prints a single pairing code containing the relay URL, the daemon token and the public key.
+  - `bridgegap pair <code>` stores it.
+  - The daemon drops any verdict whose signature fails or whose request is not pending locally.
+- **Why:**
+  - It protects against a man-in-the-middle on a plain-HTTP or misconfigured relay URL, and against a stolen daemon token: that token can submit requests but cannot produce verdicts.
+  - With HMAC, every daemon would hold the signing secret.
+- **Trade-off:** no key rotation or revocation yet. A fully compromised relay can still sign verdicts; policy tiers and quorum are the planned mitigation.
+- **Revisit if:** there are multiple relays, or key rotation is needed.
+
+## D-017: The local CLI approver stays valid alongside Slack, and the first answer wins
+Date: 2026-10-23. Model: claude-opus-5-5.
+
+- **Options:**
+  1. Disable the CLI once a relay is paired.
+  2. Keep it.
+- **Chosen:** 2.
+- **Why:** the person at the keyboard already has the same power through Claude's own prompt, and the CLI is the fallback when Slack or the relay is down.
+- **Details:**
+  - A CLI answer is reported to the relay, so the Slack message is updated and its buttons are disabled.
+  - Deny reasons are CLI-only for now; a Slack deny sends a generic message (a modal is later).
+- **Trade-off:** in Stage 1 a local process that can read `~/.bridgegap/config.json` can approve, and that is still true (THREAT.md).
+- **Revisit if:** organizational policy requires every approval to be attributed to a remote approver.

@@ -25,4 +25,10 @@ The options we rejected for each major decision, what each would have cost us, a
 | D-013 spike | Build the relay and Slack integration now | Delays answering the riskiest question (does the hook round-trip work?); needs Slack credentials first | Stage 2 |
 | D-013 | A `command` hook that calls `curl` | Spawns a process per request; quoting problems in Windows shells | The HTTP hook type is unavailable on an older Claude Code |
 | D-013 | `better-sqlite3` | Native build step, plus a third-party dependency | `node:sqlite` API changes break us |
+| D-014 transport | WebSocket between daemon and relay | Needs a WebSocket server library (Node has none); redelivery logic still needed | Many daemons per relay |
+| D-014 | Server-sent events | Still needs a separate POST path and cursor handling, and gives little over long-polling at this scale | Hosted relay |
+| D-015 Slack | Bolt with HTTP events and signing secret | Needs a public HTTPS URL plus the first runtime dependency | Hosted multi-tenant relay or Marketplace listing |
+| D-016 verdict integrity | Trust TLS only | Plain-HTTP or misconfigured URLs allow forged verdicts; a stolen daemon token could approve | Never |
+| D-016 | HMAC shared secret | Every daemon would hold the signing key | Never |
+| D-017 local approval | Disable the CLI once paired | Loses the fallback when Slack or the relay is down, with no security gain over Claude's own local prompt | An org policy requires remote attribution |
 | D-010 auth | Anyone in the room can approve | Anyone in the channel can approve tool use | Never |
