@@ -29,7 +29,10 @@
 - **Live Slack test passed:** real Claude → Slack DM → Allow click → same session continued (TESTING.md). A-010, A-011 and A-012 are verified.
 - The user's real setup is now live: `~/.bridgegap-relay` (relay, Slack in `.env`) and `~/.bridgegap` (daemon, paired with `http://127.0.0.1:47700`).
 
+- **A-001 verified in the interactive TUI:** the terminal dialog and the Slack DM are live together, and the first answer wins (TESTING.md).
+
 **Broken or risky:**
+- **Gap (D-018, next):** after a terminal **Yes**, Claude keeps the hook connection open, so the request stays pending and the Slack buttons stay live for about 30 minutes. A late click is ignored by Claude but logged as a Slack ALLOW, which makes the audit misleading. A terminal **No** is handled correctly.
 - A second real Slack user hasn't been tested, and neither has Slack's connection-rotation reconnect.
 - A-001 is still open: whether the interactive TUI shows its dialog while the hook waits.
 - A relay on a plain `http://` URL off localhost sends the daemon token and previews in clear. TLS is required in that setup (THREAT.md).
@@ -37,7 +40,7 @@
 
 **Next:**
 1. (Done: the live Slack test.)
-2. Manual TUI test for A-001.
+2. (Done: A-001.) Next is D-018: close pending requests on `PostToolUse` (and `PermissionDenied`) hooks, matched by session, tool and input.
 3. Stage 3 candidates:
    - the escalation ladder (Slack, then SMS via Twilio);
    - a Slack deny-reason modal;

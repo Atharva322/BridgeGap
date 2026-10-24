@@ -58,10 +58,17 @@ New tests in `packages/relay/test/relay.test.ts`:
 - Claude finished in the same session `59b76847-c5c2-4d8c-8575-f42690e11591` with `DONE` and 0 denials, and `slack-proof.txt` = `approved-from-slack`.
 - The relay database shows `smrtu resolved / allow / slack:U0CBN9Y0RA9`, with 1 Slack message recorded and no `chat.update` errors.
 
+**Interactive TUI test (A-001), 2026-10-23.** Real `claude --permission-mode default` in PowerShell, with the hook in the project's `.claude/settings.local.json`:
+
+| Request | Answered via | Daemon log | Result |
+|---|---|---|---|
+| `oaepv` `rm tui-test.txt` | Slack Allow | `ALLOW … via slack` | File deleted; the terminal prompt closed by itself |
+| `xzrcp` `echo second > tui-test2.txt` | Terminal Yes | stayed `PENDING`; hook connection kept open | File created; Slack buttons stayed live. A late Slack Allow was ignored by Claude (mtime unchanged) but logged as `ALLOW` (**gap, D-018**) |
+| `gvaix` `echo third > tui-test3.txt` | Terminal No | `GONE` (abandoned) | File **not** created; relay `abandoned`; Slack message updated; later clicks refused |
+
 **Not tested yet:**
 - A second real Slack user clicking (non-approver rejection, live).
 - Slack's connection-rotation reconnect.
-- The interactive TUI (A-001).
 
 ## Trying Stage 1 yourself
 1. `npm install`
