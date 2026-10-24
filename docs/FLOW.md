@@ -1,5 +1,21 @@
 # FLOW
 
+## Stage 1 as built (local only, the CLI stands in for a channel)
+1. Claude Code's PermissionRequest `http` hook sends `POST 127.0.0.1:47600/hooks/permission-request`, handled in `packages/daemon/src/server.ts`:
+   - `tokenMatches()` checks the hook token.
+   - `readJson()` reads the body; non-JSON is rejected with 415.
+2. `Store.createRequest()` (`packages/daemon/src/store.ts`) creates the ULID and a 5-letter reply code. The preview comes from `buildPreview()` (`packages/protocol/src/index.ts`), which also redacts secrets. An audit row is written.
+3. The handler holds the HTTP response open in `waiters`, keyed by `requestId`.
+4. `bridgegap approve <code>` (`packages/daemon/src/cli.ts`) sends `POST /verdicts` with the admin token. `Store.recordVerdict()` lets the first verdict win and writes it to the audit log, then the waiter delivers the verdict.
+5. The handler replies with `hookSpecificOutput.decision`, and Claude Code continues the same session.
+
+The other endings:
+- **Hold expired:** the request is marked `expired` and the reply is `{}`, so Claude shows its own dialog (D-005).
+- **Claude hangs up:** `res.on('close')` marks the request `abandoned`.
+- **Daemon restart:** `abandonOrphans()` closes requests left over from the previous run.
+
+## Target path (Stage 2+)
+
 Status: the intended path. Update this once code exists, naming the real files and functions for each step.
 
 ## Claude Code permission request (Phase 1 path)

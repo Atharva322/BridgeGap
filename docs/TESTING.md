@@ -13,4 +13,30 @@ Status: the Phase 1 acceptance checklist. Add the exact commands once the code e
 | T-7 | Codex through app-server | Same result as T-1 |
 | T-8 | Relay down | Falls back to the local prompt; the agent is not blocked |
 
+## Commands
+- `npm test`: unit and HTTP tests (node:test).
+  - Pass looks like `# tests 13`, `# pass 13`, `# fail 0`.
+- `npm run typecheck`: pass looks like no output and exit code 0.
+
+## Stage 1 results (2026-10-23, Claude Code 2.1.300, Node 22.20.0, Windows 11)
+- `npm test`: 13/13 pass; `npm run typecheck`: clean.
+- **T-1 (local, headless):** `claude -p` with the hook settings was asked to run `echo bridgegap-ok > proof.txt`.
+  - The daemon logged `PENDING zgkzq Bash: echo bridgegap-ok > proof.txt (session da0d930d)`.
+  - `bridgegap approve zgkzq` gave `ALLOW zgkzq by athar`.
+  - `proof.txt` = `bridgegap-ok`; the Claude result was `DONE`, `session_id` was unchanged (`da0d930d-…`), and there were 0 permission denials.
+- **Deny path:** `bridgegap deny huykm use the staging bucket instead`.
+  - Claude received "Denied by athar via BridgeGap: use the staging bucket instead".
+  - The file was not created.
+- **Daemon-down path (T-8 local equivalent):** the hook connection failed, which is non-blocking.
+  - Claude's own permission check denied the command, and the file was not created.
+  - It failed closed with no auto-allow (D-005).
+- **Not yet tested:** the interactive TUI (A-001), and holds longer than 10 minutes (A-008).
+
+## Trying Stage 1 yourself
+1. `npm install`
+2. `npm run bridgegap -- daemon` (leave it running).
+3. `npm run bridgegap -- hook-config`. Merge the printed block into your project's `.claude/settings.local.json`, then set `BRIDGEGAP_HOOK_TOKEN` in the shell you start Claude from.
+4. Start `claude`, then ask it to do something that needs permission.
+5. In another terminal, run `npm run bridgegap -- pending`, then `npm run bridgegap -- approve <code>` (or `deny <code> <reason>`).
+
 **Manual customer path:** install, pair Slack, run a real Claude Code task, and approve one request from a phone away from the desk.

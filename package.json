@@ -1,0 +1,21 @@
+{
+  "name": "bridgegap",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/protocol",
+    "packages/daemon"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "bridgegap": "node --disable-warning=ExperimentalWarning packages/daemon/src/cli.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test packages/*/test/*.test.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

@@ -170,3 +170,28 @@ Date: 2026-10-23. Model: claude-opus-5-5. Decided by: Atharva.
   - The Node runtime is heavier than a single static Go binary.
   - Native SQLite bindings can fail to build on some platforms (see A-009).
 - **Revisit if:** daemon distribution or memory becomes a complaint (move the daemon to Go and keep the relay in TypeScript), or the hosted relay needs Postgres (same schema, swap the driver).
+
+## D-013: Stage 1 spike has a daemon with an embedded store, a loopback HTTP hook, a CLI approver and zero runtime dependencies
+Date: 2026-10-23. Model: claude-opus-5-5. Lane A (spike).
+
+- **Context:** we need to prove that a blocked Claude Code request can be answered from outside the terminal and that the same session continues. Slack comes later.
+- **Options:**
+  1. Build the relay and Slack integration now.
+  2. A daemon with an embedded SQLite store, with `bridgegap approve <code>` / `deny <code>` standing in for a channel.
+  3. A `command` hook that runs `curl`.
+- **Chosen:** 2.
+- **Details:**
+  - The hook is Claude Code's `http` hook type posting to `127.0.0.1` only. It is authenticated with a bearer token passed through `allowedEnvVars`.
+  - The verdict endpoint needs a separate admin token.
+  - Storage is Node's built-in `node:sqlite`; TypeScript runs through Node's built-in type stripping.
+  - The only dependencies are dev dependencies: `typescript` and `@types/node`.
+- **Why:**
+  - It tests the riskiest part first: does Claude wait on the hook and accept the verdict (A-001, A-008)?
+  - An HTTP hook avoids spawning a process for every request and avoids quoting problems in Windows shells.
+  - Zero runtime dependencies keeps the supply-chain surface at zero (A-009 resolved on Windows).
+- **Clarification of the CONSTRAINTS rule against inbound ports:** that rule means network-reachable ports. A port bound to the loopback address (`127.0.0.1`) is required by the HTTP hook design and is allowed.
+- **Failure mode:** the hook keeps Claude Code's default `onFailure: continue`. If the daemon is down, Claude shows its normal local prompt; it never auto-allows (D-005).
+- **Trade-off:**
+  - `node:sqlite` is still marked experimental in Node 22, so its API may change.
+  - Any local process that can read `~/.bridgegap/config.json` can approve requests (see THREAT).
+- **Revisit if:** Stage 2 adds the relay. At that point the daemon stops being the place verdicts come from, and only signed verdicts from the relay are accepted.

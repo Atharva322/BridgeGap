@@ -12,4 +12,5 @@ BridgeGap decides whether an agent may run actions on a developer's machine. If 
 | Replayed verdict | Approve a later request | `request_id` is single-use; verdicts expire; the daemon checks the request is still pending | None |
 | Approver fatigue (blind allows) | Rubber-stamping | Auto-handle the "safe" tier so humans see fewer prompts; show context; rate-limit prompts | Human factor |
 | Malicious or compromised dependency | Supply-chain compromise | Pinned versions, DEPENDENCIES.md, few libraries | Ongoing |
-| Local process on the developer's machine | Approve through the daemon's local socket | Local socket permissions; the daemon accepts only signed verdicts from the relay | To be designed (D-012) |
+| Local process on the developer's machine | Approve through the daemon's loopback endpoint | Stage 1: bind to `127.0.0.1`; separate hook and admin bearer tokens compared in constant time; config file is mode 0600 (no effect on Windows). Stage 2: the daemon accepts only signed verdicts from the relay | Stage 1: any process running as the same OS user can read the admin token |
+| Website in the developer's browser | Send cross-site requests to `127.0.0.1` | Bearer token required on every endpoint; JSON-only bodies; no CORS headers | None known |
