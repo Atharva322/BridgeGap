@@ -19,7 +19,7 @@
 - Anthropic Channels could absorb the Claude-only case. Lead with multi-vendor support and team policy.
 
 **Next:**
-1. Initial commit of the docs scaffold.
+1. (Done: initial commit `cf8974e`.)
 2. Decide D-012 (stack).
 3. Write the protocol spec: request and verdict schemas, broker API, channel interface.
 4. Spike: Claude Code PermissionRequest HTTP hook → broker → Slack button → verdict → the same session resumes.
