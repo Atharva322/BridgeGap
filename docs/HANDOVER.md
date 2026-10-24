@@ -26,14 +26,17 @@
 **In progress:**
 - None.
 
+- **Live Slack test passed:** real Claude → Slack DM → Allow click → same session continued (TESTING.md). A-010, A-011 and A-012 are verified.
+- The user's real setup is now live: `~/.bridgegap-relay` (relay, Slack in `.env`) and `~/.bridgegap` (daemon, paired with `http://127.0.0.1:47700`).
+
 **Broken or risky:**
-- Nothing has run against a live Slack workspace yet (A-010, A-011, A-012). The Socket Mode code is written from the protocol and has only been tested against a fake Slack API.
+- A second real Slack user hasn't been tested, and neither has Slack's connection-rotation reconnect.
 - A-001 is still open: whether the interactive TUI shows its dialog while the hook waits.
 - A relay on a plain `http://` URL off localhost sends the daemon token and previews in clear. TLS is required in that setup (THREAT.md).
 - Nothing limits how many requests can be sent to approvers.
 
 **Next:**
-1. The user creates the Slack app (SLACK-SETUP.md) and fills in `.env`. Then run the live test: real `claude`, a Slack DM, a click, and the session continues. Record the results against A-010–A-012.
+1. (Done: the live Slack test.)
 2. Manual TUI test for A-001.
 3. Stage 3 candidates:
    - the escalation ladder (Slack, then SMS via Twilio);

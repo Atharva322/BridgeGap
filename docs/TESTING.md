@@ -49,9 +49,19 @@ New tests in `packages/relay/test/relay.test.ts`:
 - A hook request reached the relay already redacted (`Bash: rm -rf build [redacted]`).
 - The CLI deny returned the reason to the hook, and the relay recorded `resolved: Denied locally by athar.`
 
+**Live Slack test (2026-10-23), with real Claude Code 2.1.300 `-p` and a real Slack workspace:**
+- The relay logged `SLACK connected (Socket Mode)`; the daemon logged `RELAY connected`.
+- Claude was asked to run `echo approved-from-slack > slack-proof.txt`:
+  - the daemon logged `PENDING smrtu … (session 59b76847)`;
+  - the relay logged `SLACK sent smrtu to 1 approver(s)`.
+- The approver clicked **Allow** in the Slack DM. The daemon logged `ALLOW smrtu by slack:U0CBN9Y0RA9 (atharvarane.bui) via slack`, after the signature was verified.
+- Claude finished in the same session `59b76847-c5c2-4d8c-8575-f42690e11591` with `DONE` and 0 denials, and `slack-proof.txt` = `approved-from-slack`.
+- The relay database shows `smrtu resolved / allow / slack:U0CBN9Y0RA9`, with 1 Slack message recorded and no `chat.update` errors.
+
 **Not tested yet:**
-- A live Slack workspace: Socket Mode connection, real DMs and button clicks (A-010, A-011). Steps are in [SLACK-SETUP.md](SLACK-SETUP.md).
-- Real Claude Code with Slack approval. This is the same hook path as Stage 1's real Claude test, but untested with Slack.
+- A second real Slack user clicking (non-approver rejection, live).
+- Slack's connection-rotation reconnect.
+- The interactive TUI (A-001).
 
 ## Trying Stage 1 yourself
 1. `npm install`
