@@ -20,7 +20,7 @@
 
 **Next:**
 1. (Done: initial commit `cf8974e`.)
-2. Decide D-012 (stack).
+2. (Done: D-012 is TypeScript on Node 22 with SQLite. Local environment: Node 22.20.0, npm 10.9.3, Claude Code 2.1.300; pnpm is not installed, so we use npm workspaces.)
 3. Write the protocol spec: request and verdict schemas, broker API, channel interface.
 4. Spike: Claude Code PermissionRequest HTTP hook → broker → Slack button → verdict → the same session resumes.
 5. Verify the unverified items in `ASSUMPTIONS.md`, starting with A-001.

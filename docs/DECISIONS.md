@@ -149,10 +149,24 @@ Date: 2026-10-23. Model: claude-opus-5-5.
 - Cursor hooks support allow and deny only. ACP implementations vary in quality, for example Copilot's `--acp` auto-approve bug.
 - **Revisit if:** user demand is mostly Cursor.
 
-## D-012 (open): stack
-Options:
-- A TypeScript or Go daemon.
-- Postgres or SQLite.
-- A hosted or self-hosted relay first.
+## D-012: TypeScript (Node 22) monorepo with SQLite first and Postgres later
+Date: 2026-10-23. Model: claude-opus-5-5. Decided by: Atharva.
 
-To be decided before the spike.
+- **Context:** we need a stack for the local daemon, the relay (broker, policy, channels) and the shared protocol.
+- **Options:**
+  1. TypeScript everywhere with SQLite.
+  2. A Go daemon with a TypeScript relay.
+  3. Go everywhere.
+  4. Python.
+- **Chosen:** 1. An npm-workspaces monorepo with three packages:
+  - `packages/protocol`: request and verdict schemas.
+  - `packages/daemon`: hook endpoint and outbound WebSocket.
+  - `packages/relay`: broker, policy and channels.
+- **Why:**
+  - The integrations we need are all TypeScript-first: Slack Bolt, Twilio, the MCP SDK (required for a Claude Channels plugin), the Claude Agent SDK and the ACP libraries.
+  - Claude Code users already have Node, so the daemon installs through npm.
+  - Using one language lets the daemon and relay share the protocol types with no code generation.
+- **Trade-off:**
+  - The Node runtime is heavier than a single static Go binary.
+  - Native SQLite bindings can fail to build on some platforms (see A-009).
+- **Revisit if:** daemon distribution or memory becomes a complaint (move the daemon to Go and keep the relay in TypeScript), or the hosted relay needs Postgres (same schema, swap the driver).

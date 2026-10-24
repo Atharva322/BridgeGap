@@ -19,4 +19,7 @@ The options we rejected for each major decision, what each would have cost us, a
 | D-008 scope | Full remote shell or file access | Huge attack surface (Pocket's public tunnel, Code Light's `bash` remote call) | A separate, opt-in product |
 | D-009 connectivity | Inbound tunnel | Exposes the machine; quick-tunnel URLs change on every restart | Never |
 | D-009 | LAN only | No reach outside the home network; no push | A self-hosted, air-gapped mode |
+| D-012 stack | Go daemon with a TypeScript relay | Two languages; the shared schema needs code generation | Daemon size or distribution becomes a complaint |
+| D-012 | Go everywhere | Slack and MCP SDKs for Go are community-maintained; the Channels plugin needs MCP | Never for the relay |
+| D-012 | Python | Harder to package and distribute; the Agent SDK's `canUseTool` needs a workaround in Python | A Python SDK for custom agents (Phase 2) |
 | D-010 auth | Anyone in the room can approve | Anyone in the channel can approve tool use | Never |
