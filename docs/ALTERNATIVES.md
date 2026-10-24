@@ -31,4 +31,6 @@ The options we rejected for each major decision, what each would have cost us, a
 | D-016 verdict integrity | Trust TLS only | Plain-HTTP or misconfigured URLs allow forged verdicts; a stolen daemon token could approve | Never |
 | D-016 | HMAC shared secret | Every daemon would hold the signing key | Never |
 | D-017 local approval | Disable the CLI once paired | Loses the fallback when Slack or the relay is down, with no security gain over Claude's own local prompt | An org policy requires remote attribution |
+| D-018 terminal-Yes detection | Wait for the hold to expire | Slack buttons stay live for up to 30 min; the audit records misleading late approvals | Never |
+| D-018 | Watch the transcript `.jsonl` | Depends on an undocumented file format; requires polling the file | Claude removes the PostToolUse hooks |
 | D-010 auth | Anyone in the room can approve | Anyone in the channel can approve tool use | Never |

@@ -46,6 +46,10 @@ async function main(argv: string[]): Promise<number> {
       const relay = config.relay ? new RelayClient(config.relay, log) : undefined;
       const { server, acceptRelayVerdict } = createDaemon({ ...config, store, relay, log });
       const stopRelay = new AbortController();
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        console.error(err.code === 'EADDRINUSE' ? `port ${config.port} is already in use; is another daemon running?` : err.message);
+        process.exit(1);
+      });
       server.listen(config.port, '127.0.0.1', () => {
         log(`listening on 127.0.0.1:${config.port}  (db ${config.dbPath})`);
         log(relay ? `paired with relay ${relay.url}` : 'local-only (no relay paired); answer with `bridgegap approve <code>`');

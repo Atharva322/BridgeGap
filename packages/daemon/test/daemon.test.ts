@@ -151,6 +151,47 @@ test('non-JSON bodies are rejected (blocks simple cross-site form posts from a b
   assert.equal(res.status, 415);
 });
 
+test('D-018: a PostToolUse for the held call closes it as answered in the terminal', async () => {
+  const { store, base } = await startDaemon();
+  const hook = postJson(`${base}/hooks/permission-request`, HOOK_TOKEN, hookInput);
+  const pending = await waitForPending(store);
+
+  // A different session's identical command, and a different command in this session, must not match.
+  for (const other of [
+    { ...hookInput, session_id: 'other-session' },
+    { ...hookInput, tool_input: { command: 'npm run lint' } },
+  ]) {
+    const res = await postJson(`${base}/hooks/tool-finished`, HOOK_TOKEN, { ...other, hook_event_name: 'PostToolUse' });
+    assert.deepEqual(await res.json(), {});
+  }
+  assert.equal(store.getRequest(pending.requestId)?.status, 'pending');
+
+  // Same call, keys in a different order plus the tool_use_id PostToolUse adds: must match.
+  const finished = await postJson(`${base}/hooks/tool-finished`, HOOK_TOKEN, {
+    hook_event_name: 'PostToolUse',
+    tool_use_id: 'toolu_123',
+    tool_input: { command: 'npm test' },
+    tool_name: 'Bash',
+    session_id: 'sess-1234-abcd',
+    cwd: '/repo',
+  });
+  assert.deepEqual(await finished.json(), {});
+  assert.deepEqual(await (await hook).json(), {}, 'the held hook is released with no decision');
+  assert.equal(store.getRequest(pending.requestId)?.status, 'resolved');
+  assert.deepEqual(store.auditTrail(pending.requestId).map((e) => e.event), ['request_created', 'answered_locally']);
+
+  const late = await postJson(`${base}/verdicts`, ADMIN_TOKEN, { code: pending.replyCode, decision: 'allow' });
+  assert.equal(late.status, 404, 'a later remote answer is refused instead of being logged as an approval');
+});
+
+test('D-018: tool-finished needs the hook token and is a no-op when nothing is held', async () => {
+  const { base } = await startDaemon();
+  const anonymous = await postJson(`${base}/hooks/tool-finished`, '', hookInput);
+  assert.equal(anonymous.status, 401);
+  const res = await postJson(`${base}/hooks/tool-finished`, HOOK_TOKEN, hookInput);
+  assert.equal(res.status, 200);
+});
+
 test('abandonOrphans closes requests left pending by a previous daemon run', () => {
   const store = new Store(':memory:');
   const request = store.createRequest({ sessionId: 's', cwd: '/', toolName: 'Bash', preview: 'Bash: ls', holdMs: 1_000 });

@@ -171,13 +171,17 @@ export class Store {
     return { ok: true, verdict };
   }
 
-  /** Moves a still-pending request to a terminal status (expired by timeout, abandoned by the agent). */
-  closeRequest(requestId: string, status: 'expired' | 'abandoned', now: number = Date.now()): boolean {
+  /**
+   * Moves a still-pending request to a terminal status without a verdict: expired by timeout,
+   * abandoned by the agent, or resolved because the human answered in the terminal (D-018).
+   * `event` overrides the audit event name (default `request_<status>`).
+   */
+  closeRequest(requestId: string, status: 'resolved' | 'expired' | 'abandoned', event?: string, now: number = Date.now()): boolean {
     const result = this.db
       .prepare(`UPDATE requests SET status = ? WHERE request_id = ? AND status = 'pending'`)
       .run(status, requestId);
     if (result.changes === 0) return false;
-    this.audit(requestId, `request_${status}`, null, now);
+    this.audit(requestId, event ?? `request_${status}`, null, now);
     return true;
   }
 
@@ -187,7 +191,7 @@ export class Store {
    */
   abandonOrphans(now: number = Date.now()): number {
     let count = 0;
-    for (const request of this.listPending()) if (this.closeRequest(request.requestId, 'abandoned', now)) count++;
+    for (const request of this.listPending()) if (this.closeRequest(request.requestId, 'abandoned', undefined, now)) count++;
     return count;
   }
 

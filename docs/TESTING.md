@@ -66,6 +66,13 @@ New tests in `packages/relay/test/relay.test.ts`:
 | `xzrcp` `echo second > tui-test2.txt` | Terminal Yes | stayed `PENDING`; hook connection kept open | File created; Slack buttons stayed live. A late Slack Allow was ignored by Claude (mtime unchanged) but logged as `ALLOW` (**gap, D-018**) |
 | `gvaix` `echo third > tui-test3.txt` | Terminal No | `GONE` (abandoned) | File **not** created; relay `abandoned`; Slack message updated; later clicks refused |
 
+**D-018 test (terminal Yes closes the request), 2026-10-23, Claude Code 2.1.310:**
+- `npm test`: 29/29 pass, run twice; `npm run typecheck`: clean.
+- Real hook payloads were captured first: PermissionRequest has no `tool_use_id`, while PostToolUse and PostToolUseFailure repeat the same `session_id`, `tool_name` and `tool_input`.
+- **Live daemon probe:** a simulated PermissionRequest then PostToolUse produced `PENDING stiey`, then `LOCAL stiey answered in the terminal`. The relay recorded `resolved: Answered in the terminal.`
+- **Live interactive TUI:** `rmdir d018-check` produced `PENDING xdnvy`, a Slack DM, and a terminal **Yes**. The daemon logged `LOCAL xdnvy answered in the terminal` (audit: `request_created`, `answered_locally`). The relay recorded `resolved: Answered in the terminal.` with **0 Slack verdicts**, and the folder was removed.
+- **Finding (A-014):** the first two retries never reached BridgeGap, because the session was in **auto** permission mode (`permissionMode: "auto"` in the transcript). Claude's own check approved `mkdir` and `rm` without a prompt or a hook call. After switching modes with Shift+Tab, the request came through.
+
 **Not tested yet:**
 - A second real Slack user clicking (non-approver rejection, live).
 - Slack's connection-rotation reconnect.

@@ -261,3 +261,31 @@ Date: 2026-10-23. Model: claude-opus-5-5.
   - Deny reasons are CLI-only for now; a Slack deny sends a generic message (a modal is later).
 - **Trade-off:** in Stage 1 a local process that can read `~/.bridgegap/config.json` can approve, and that is still true (THREAT.md).
 - **Revisit if:** organizational policy requires every approval to be attributed to a remote approver.
+
+## D-018: Detect terminal approvals through PostToolUse / PostToolUseFailure hooks, matched on session, tool and input
+Date: 2026-10-23. Model: claude-opus-5-5.
+
+- **Context:** A-001 testing found an asymmetry in the interactive TUI.
+  - A terminal **No** drops the hook connection, so we see it.
+  - A terminal **Yes** runs the tool but leaves our hook request open, so BridgeGap still treats the request as pending and the Slack buttons stay live for the whole hold. A late click is ignored by Claude but was logged as a Slack ALLOW, which makes the audit misleading (A-013).
+- **Captured payloads:** real payloads from Claude Code 2.1.300.
+  - `PermissionRequest` has `session_id`, `tool_name` and `tool_input`, but **no `tool_use_id`**.
+  - `PostToolUse` (on success) and `PostToolUseFailure` (on error) carry the same `session_id` and `tool_name` and an identical `tool_input`, plus a `tool_use_id`.
+- **Options:**
+  1. Wait for the hold to expire.
+  2. Watch the transcript file.
+  3. Add `PostToolUse` and `PostToolUseFailure` HTTP hooks that report "tool finished" to the daemon.
+- **Chosen:** 3.
+  - The daemon matches a finished tool to its held request using `session_id`, `tool_name` and the SHA-256 of the canonical (key-sorted) JSON of `tool_input`. If several requests match, the oldest wins.
+  - A match closes the request as answered in the terminal: the local status becomes `resolved` with no verdict row and an `answered_locally` audit event.
+  - The held hook gets `{}`; Claude has already moved on and ignores it.
+  - The relay is told `resolved: Answered in the terminal.`, so the Slack message is rewritten and later clicks are refused.
+- **Why:**
+  - It uses official hook events (D-001) with fields we observed, not guessed.
+  - The match key comes from data both events share.
+  - The match state only needs to live in memory, because it only matters while a hook connection is held.
+- **Trade-off:**
+  - The request closes only when the tool *finishes*, so a long-running command (e.g. a 5-minute test run) keeps the Slack buttons live until it ends. A click in that window is ignored by Claude (A-013), but it is still recorded as a Slack verdict. Accepted for now.
+  - Two identical tool calls in one session can't be told apart; the oldest is closed first, which is harmless because both had the same input.
+  - Users must re-run `hook-config`, because older settings lack the new hooks.
+- **Revisit if:** Claude Code adds a `PermissionResolved`-style event or puts `tool_use_id` in PermissionRequest (then match by ID).

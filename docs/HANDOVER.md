@@ -31,8 +31,12 @@
 
 - **A-001 verified in the interactive TUI:** the terminal dialog and the Slack DM are live together, and the first answer wins (TESTING.md).
 
+- **D-018 built and verified live:** PostToolUse/PostToolUseFailure hooks close a request answered **Yes** in the terminal. Slack shows "Answered in the terminal" and later clicks are refused. `hook-config` now emits 3 hooks, so existing users must re-run it.
+- The daemon logs `REJECTED` for calls with a bad token, which used to fail silently. Both CLIs print a plain message when their port is already in use.
+
 **Broken or risky:**
-- **Gap (D-018, next):** after a terminal **Yes**, Claude keeps the hook connection open, so the request stays pending and the Slack buttons stay live for about 30 minutes. A late click is ignored by Claude but logged as a Slack ALLOW, which makes the audit misleading. A terminal **No** is handled correctly.
+- **A-014:** in auto, bypass or accept-edits mode, Claude approves on its own and BridgeGap never sees the request. Next: warn once per session when `permission_mode` isn't `default`/`plan`.
+- Claude Code auto-updated from 2.1.300 to 2.1.310 during testing. Each update can change hook behaviour, which is the Omnara lesson; re-run TESTING.md after updates.
 - A second real Slack user hasn't been tested, and neither has Slack's connection-rotation reconnect.
 - A-001 is still open: whether the interactive TUI shows its dialog while the hook waits.
 - A relay on a plain `http://` URL off localhost sends the daemon token and previews in clear. TLS is required in that setup (THREAT.md).
@@ -40,7 +44,7 @@
 
 **Next:**
 1. (Done: the live Slack test.)
-2. (Done: A-001.) Next is D-018: close pending requests on `PostToolUse` (and `PermissionDenied`) hooks, matched by session, tool and input.
+2. (Done: A-001 and D-018.) Next: the permission-mode warning (A-014).
 3. Stage 3 candidates:
    - the escalation ladder (Slack, then SMS via Twilio);
    - a Slack deny-reason modal;

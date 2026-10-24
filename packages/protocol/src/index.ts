@@ -1,6 +1,6 @@
 // Shared request/verdict shapes between the daemon and the relay.
 // See docs/DATA.md for the reasoning behind each field.
-import { randomBytes, randomInt, sign, verify, type KeyLike } from 'node:crypto';
+import { createHash, randomBytes, randomInt, sign, verify, type KeyLike } from 'node:crypto';
 
 export type Decision = 'allow' | 'deny';
 
@@ -116,6 +116,23 @@ const SECRET_PATTERNS: RegExp[] = [
   /\b(?:api[_-]?key|token|secret|passw(?:or)?d|authorization)\b\s*[=:]\s*["']?[^\s"']+/gi,
   /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g,
 ];
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * Identifies "the same tool call" across hook events that share no id: PermissionRequest carries no
+ * tool_use_id, but PostToolUse/PostToolUseFailure repeat the identical tool_input (D-018).
+ */
+export function toolCallKey(sessionId: string, toolName: string, toolInput: unknown): string {
+  return createHash('sha256').update(canonicalJson([sessionId, toolName, toolInput ?? null])).digest('hex');
+}
 
 export const PREVIEW_MAX = 300;
 

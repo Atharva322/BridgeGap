@@ -240,6 +240,31 @@ test('D-016: a daemon pinned to a different relay key rejects the verdict and fa
   assert.equal(store.getRequest(requestId)?.status, 'expired');
 });
 
+test('D-018: a terminal Yes (seen as PostToolUse) rewrites Slack to "Answered in the terminal" and refuses later clicks', async () => {
+  const relay = setupRelay();
+  const relayUrl = await listen(createRelayServer({ broker: relay.broker, daemonToken: DAEMON_TOKEN }));
+  const store = new Store(':memory:');
+  cleanups.push(() => store.close());
+  const client = new RelayClient({ relayUrl, daemonToken: DAEMON_TOKEN, relayPublicKey: relay.publicKeyPem });
+  const { server } = createDaemon({ store, hookToken: 'h', adminToken: 'a', holdMs: 5_000, relay: client });
+  const daemonUrl = await listen(server);
+  const call = { session_id: 's', cwd: '/r', tool_name: 'Bash', tool_input: { command: 'echo second > f.txt' } };
+  const post = (path: string, body: unknown) =>
+    fetch(`${daemonUrl}${path}`, { method: 'POST', headers: { authorization: 'Bearer h', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+  const hook = post('/hooks/permission-request', call);
+  await until(() => relay.slack.calls.length === 1, 'slack DM');
+  await post('/hooks/tool-finished', { ...call, hook_event_name: 'PostToolUse', tool_use_id: 'toolu_1' });
+  await hook;
+  await until(() => relay.slack.calls.some((c) => c.method === 'chat.update'), 'slack update');
+  assert.match(JSON.stringify(relay.slack.calls.at(-1)!.body.blocks), /Answered in the terminal/);
+
+  const requestId = relay.slack.calls[0]!.body.blocks.at(-1).elements[0].value as string;
+  await relay.channel.handleInteraction(click(requestId, APPROVER));
+  assert.match(String(relay.slack.responses.at(-1)!.body.text), /no longer waiting/);
+  assert.equal(relay.store.verdictsAfter(0).length, 0, 'no misleading Slack verdict is recorded (A-013)');
+});
+
 test('D-017: answering locally updates the Slack message and later clicks are refused', async () => {
   const relay = setupRelay();
   const relayUrl = await listen(createRelayServer({ broker: relay.broker, daemonToken: DAEMON_TOKEN }));

@@ -2,7 +2,7 @@
 // until a verdict arrives (local CLI or, when paired, the relay), the hold expires, or Claude drops
 // the connection. See docs/FLOW.md.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { buildPreview, type Decision, type Verdict } from '@bridgegap/protocol';
+import { buildPreview, toolCallKey, type Decision, type Verdict } from '@bridgegap/protocol';
 import { handleErrors, HttpError, readJson, requireToken, send } from '@bridgegap/protocol/http';
 import type { RelayClient } from './relay-client.ts';
 import type { Store } from './store.ts';
@@ -33,11 +33,18 @@ function hookDecision(verdict: Verdict): unknown {
   return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
 }
 
+type Outcome = Verdict | 'expired' | 'abandoned' | 'answered_locally';
+
+interface Waiter {
+  finish: (outcome: Outcome) => void;
+  callKey: string; // toolCallKey(session, tool, input): how PostToolUse finds this request (D-018)
+}
+
 export function createDaemon(options: DaemonOptions): Daemon {
   const { store, holdMs, relay } = options;
   const log = options.log ?? (() => {});
-  // requestId -> delivers a verdict to the hook connection that is waiting for it.
-  const waiters = new Map<string, (verdict: Verdict) => void>();
+  // requestId -> the held hook connection. Map iteration is insertion order, i.e. oldest first.
+  const waiters = new Map<string, Waiter>();
 
   async function handlePermissionRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     requireToken(req, options.hookToken, 'hook');
@@ -54,14 +61,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
     });
     log(`PENDING  ${request.replyCode}  ${request.preview}  (session ${request.sessionId.slice(0, 8)})`);
 
-    const outcome = new Promise<Verdict | 'expired' | 'abandoned'>((resolve) => {
-      const finish = (value: Verdict | 'expired' | 'abandoned') => {
+    const outcome = new Promise<Outcome>((resolve) => {
+      const finish = (value: Outcome) => {
         clearTimeout(timer);
         waiters.delete(request.requestId);
         resolve(value);
       };
       const timer = setTimeout(() => finish('expired'), holdMs);
-      waiters.set(request.requestId, finish);
+      waiters.set(request.requestId, { finish, callKey: toolCallKey(input.session_id as string, request.toolName, input.tool_input) });
       // Claude cancelled the hook (user interrupted, or its own timeout fired before ours).
       res.on('close', () => {
         if (waiters.has(request.requestId)) finish('abandoned');
@@ -75,6 +82,14 @@ export function createDaemon(options: DaemonOptions): Daemon {
       store.closeRequest(request.requestId, 'abandoned');
       log(`GONE     ${request.replyCode}  agent stopped waiting`);
       void relay?.close(request.requestId, 'abandoned', 'The agent stopped waiting.');
+      return;
+    }
+    if (result === 'answered_locally') {
+      store.closeRequest(request.requestId, 'resolved', 'answered_locally');
+      log(`LOCAL    ${request.replyCode}  answered in the terminal`);
+      void relay?.close(request.requestId, 'resolved', 'Answered in the terminal.');
+      // Claude already acted on the terminal answer and ignores whatever this returns (A-013).
+      send(res, 200, {});
       return;
     }
     if (result === 'expired') {
@@ -106,9 +121,29 @@ export function createDaemon(options: DaemonOptions): Daemon {
       send(res, 404, { error: result.reason });
       return;
     }
-    const deliver = waiters.get(result.verdict.requestId);
-    deliver?.(result.verdict);
-    send(res, 200, { status: 'recorded', delivered: Boolean(deliver), requestId: result.verdict.requestId });
+    const waiter = waiters.get(result.verdict.requestId);
+    waiter?.finish(result.verdict);
+    send(res, 200, { status: 'recorded', delivered: Boolean(waiter), requestId: result.verdict.requestId });
+  }
+
+  /**
+   * PostToolUse / PostToolUseFailure: the tool ran, so if we are still holding its permission request,
+   * the human must have approved it in the terminal (D-018). Always answers with an empty object, a
+   * no-op for Claude, even when nothing matches (the usual case: the request was answered through us).
+   */
+  async function handleToolFinished(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    requireToken(req, options.hookToken, 'hook');
+    const input = await readJson(req);
+    if (typeof input.session_id === 'string' && typeof input.tool_name === 'string') {
+      const key = toolCallKey(input.session_id, input.tool_name, input.tool_input);
+      for (const waiter of waiters.values()) {
+        if (waiter.callKey === key) {
+          waiter.finish('answered_locally');
+          break; // oldest identical call only
+        }
+      }
+    }
+    send(res, 200, {});
   }
 
   function handlePending(req: IncomingMessage, res: ServerResponse): void {
@@ -124,7 +159,7 @@ export function createDaemon(options: DaemonOptions): Daemon {
       log(`IGNORED  relay verdict for ${verdict.requestId}: not pending here`);
       return;
     }
-    waiters.get(verdict.requestId)?.(result.verdict);
+    waiters.get(verdict.requestId)?.finish(result.verdict);
   }
 
   const server = createServer((req, res) => {
@@ -132,12 +167,18 @@ export function createDaemon(options: DaemonOptions): Daemon {
     const handled =
       route === 'POST /hooks/permission-request'
         ? handlePermissionRequest(req, res)
-        : route === 'POST /verdicts'
+        : route === 'POST /hooks/tool-finished'
+          ? handleToolFinished(req, res)
+          : route === 'POST /verdicts'
           ? handleVerdict(req, res)
           : route === 'GET /requests/pending'
             ? Promise.resolve().then(() => handlePending(req, res))
             : Promise.reject(new HttpError(404, 'not found'));
-    handled.catch(handleErrors(res, log));
+    handled.catch((err: unknown) => {
+      // A rejected hook call is invisible to the user (Claude just shows its own prompt), so say so here.
+      if (err instanceof HttpError && err.status === 401) log(`REJECTED ${route}: ${err.message} (is BRIDGEGAP_HOOK_TOKEN set in the shell that started claude?)`);
+      handleErrors(res, log)(err);
+    });
   });
   // WHY: a hook request is held open for minutes while a human decides. Node's default
   // requestTimeout (300s) would cut it off, and Claude would treat that as a hook failure.

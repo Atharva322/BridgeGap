@@ -68,21 +68,26 @@ export function saveRelayPairing(config: DaemonConfig, pairing: Pairing | undefi
 
 /** The `hooks` block to merge into a Claude Code settings file. The token stays in an env var, not the file. */
 export function claudeHookSettings(config: DaemonConfig): unknown {
-  return {
-    hooks: {
-      PermissionRequest: [
+  const hook = (path: string, timeout: number) => [
+    {
+      hooks: [
         {
-          hooks: [
-            {
-              type: 'http',
-              url: `http://127.0.0.1:${config.port}/hooks/permission-request`,
-              timeout: config.hookTimeoutSeconds,
-              headers: { Authorization: 'Bearer $BRIDGEGAP_HOOK_TOKEN' },
-              allowedEnvVars: ['BRIDGEGAP_HOOK_TOKEN'],
-            },
-          ],
+          type: 'http',
+          url: `http://127.0.0.1:${config.port}${path}`,
+          timeout,
+          headers: { Authorization: 'Bearer $BRIDGEGAP_HOOK_TOKEN' },
+          allowedEnvVars: ['BRIDGEGAP_HOOK_TOKEN'],
         },
       ],
+    },
+  ];
+  return {
+    hooks: {
+      PermissionRequest: hook('/hooks/permission-request', config.hookTimeoutSeconds),
+      // Tell the daemon a tool ran, so a request approved in the terminal is closed (D-018).
+      // The daemon answers immediately; a short timeout keeps Claude from waiting if it is down.
+      PostToolUse: hook('/hooks/tool-finished', 5),
+      PostToolUseFailure: hook('/hooks/tool-finished', 5),
     },
   };
 }

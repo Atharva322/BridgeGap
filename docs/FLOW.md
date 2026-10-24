@@ -24,6 +24,11 @@ The other endings:
 7. The daemon's `RelayClient.run()` long-poll (`GET /v1/verdicts?after=<seq>`) receives the verdict and verifies its signature against the pinned key (D-016). `acceptRelayVerdict()` then calls `Store.applyVerdict()` (first wins locally too) and wakes the waiter.
 8. The hook replies with the decision, as in Stage 1.
 
+**Terminal Yes (D-018):** Claude keeps the hook open after a terminal Yes.
+1. When the tool finishes, the `PostToolUse` (or `PostToolUseFailure`) hook sends `POST /hooks/tool-finished`.
+2. `handleToolFinished()` computes `toolCallKey(session, tool, input)` and finds the oldest held waiter with that key.
+3. That waiter is finished with `answered_locally`: the local status becomes `resolved` (audit `answered_locally`), the held hook gets `{}`, and the relay gets `resolved: Answered in the terminal.`
+
 **Local endings:** a CLI answer, an expiry or an abandoned request makes the daemon call `RelayClient.close()`, which sends `POST /v1/requests/close`. The relay then runs `Broker.close()` and rewrites the Slack message, so later clicks get "no longer waiting". The relay's own `expireDue()` sweep, every 5 s, covers daemons that disappeared.
 
 ## Target path (Stage 3+)

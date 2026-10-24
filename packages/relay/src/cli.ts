@@ -34,6 +34,10 @@ function main(argv: string[]): number | Promise<number> {
       }
       const sweeper = setInterval(() => broker.expireDue(), EXPIRY_SWEEP_MS);
       const server = createRelayServer({ broker, daemonToken: config.daemonToken, log });
+      server.on('error', (err: NodeJS.ErrnoException) => {
+        console.error(err.code === 'EADDRINUSE' ? `port ${config.port} is already in use; is another relay running?` : err.message);
+        process.exit(1);
+      });
       server.listen(config.port, config.host, () => log(`listening on ${config.host}:${config.port}  (db ${config.dbPath})`));
       const shutdown = () => {
         stop.abort();
